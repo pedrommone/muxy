@@ -2,7 +2,7 @@
 
 `muxy.git` gives extensions full programmatic access to the repository behind the active project — status, diffs, history, branches, pull requests, and worktrees. It is the same git core the app and the mobile remote use, so there is one source of truth for everything git.
 
-On tabs/panels/popovers these methods return a `Promise` (use `await`); in [`runScript`](scripts.md) commands and background scripts the same calls are **synchronous** and return the value directly. They operate on the **active worktree of a project**. Pass `{ project }` (a project id, name, or path) to target a specific project; omit it to use the active one.
+On tabs/panels/popovers these methods return a `Promise` (use `await`); in [`runScript`](scripts.md) commands and background scripts the same calls are **synchronous** and return the value directly. They operate on the **active worktree of a project**. Pass `{ project }` (a project id, name, or path) to target a specific project; omit it to use the active one. `status`, `pr.info`, `pr.number`, and `pr.list` also accept `{ project, worktree }`, where `worktree` is an id, name, branch, or path. Targeted reads do not change the visible workspace.
 
 > Use `muxy.git` instead of shelling out with `muxy.exec` — it returns structured data, is cached, and avoids spawning a `git`/`gh` process per call.
 
@@ -51,6 +51,12 @@ const s = await muxy.git.status();
 //   unstagedFiles: [ ... ],
 //   pullRequest: null | { url, number, state, isDraft, baseBranch, mergeable, mergeStateStatus, isCrossRepository, checks }
 // }
+```
+
+For a non-active worktree, pass both stable identifiers:
+
+```js
+const s = await muxy.git.status({ project: projectID, worktree: worktreeID });
 ```
 
 `status` on each file is the git status letter (`M`, `A`, `D`, `R`, `?`, …).

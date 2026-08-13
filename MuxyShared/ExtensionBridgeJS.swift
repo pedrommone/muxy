@@ -126,7 +126,10 @@ public enum ExtensionBridgeJS {
             const muxy = {
                 extensionID: \(extLiteral),
                 \(surface == .inProcess ? "toast: (opts) => dispatch('toast', opts || {})," : "")
-                notifications: { notify: (opts) => dispatch('notifications.notify', opts || {}) },
+                notifications: {
+                    notify: (opts) => dispatch('notifications.notify', opts || {}),
+                    unreadCounts: () => dispatch('notifications.unreadCounts', {}),
+                },
                 exec(argvOrOptions, maybeOptions) {
                     return dispatch('exec', buildExecPayload(argvOrOptions, maybeOptions));
                 },
@@ -261,7 +264,7 @@ public enum ExtensionBridgeJS {
         \(ghBlock)
         \(agentsBlock)
             \(surface == .inProcess ?
-            "Object.freeze(muxy.tabs); Object.freeze(muxy.browser); Object.freeze(muxy.panes); Object.freeze(muxy.projects); Object.freeze(muxy.workspaces); Object.freeze(muxy.worktrees); Object.freeze(muxy.files);" :
+            "Object.freeze(muxy.tabs); Object.freeze(muxy.browser); Object.freeze(muxy.panes); Object.freeze(muxy.projects); Object.freeze(muxy.workspaces); Object.freeze(muxy.worktrees); Object.freeze(muxy.files); Object.freeze(muxy.navigation);" :
             "")
             \(surface == .background ? "Object.freeze(muxy.tabs);" : "")
             Object.freeze(muxy.git); Object.freeze(muxy.git.pr); Object.freeze(muxy.git.branch); Object.freeze(muxy.git.worktree);
@@ -371,7 +374,7 @@ public enum ExtensionBridgeJS {
                 rename:     (paneID, title)     => dispatch('panes.rename', { paneID, title: String(title) }),
             };
             muxy.projects = {
-                list:     ()           => dispatch('projects.list', {}),
+                list:     (o)          => dispatch('projects.list', { scope: (o || {}).scope == null ? null : String(o.scope) }),
                 switchTo: (identifier) => dispatch('projects.switch', { identifier: String(identifier) }),
                 delete:   (identifier) => dispatch('projects.delete', { identifier: String(identifier) }),
                 add:      (path)               => dispatch('projects.add', { path: String(path) }),
@@ -401,12 +404,22 @@ public enum ExtensionBridgeJS {
                 delete:   (identifier)         => dispatch('workspaces.delete', { identifier: String(identifier) }),
             };
             muxy.worktrees = {
-                list:     (project)             => dispatch('worktrees.list', { project: project == null ? null : String(project) }),
+                list:     (projectOrOptions)     => {
+                    const o = projectOrOptions && typeof projectOrOptions === 'object' ? projectOrOptions : {};
+                    const project = projectOrOptions && typeof projectOrOptions !== 'object' ? projectOrOptions : o.project;
+                    return dispatch('worktrees.list', {
+                        project: project == null ? null : String(project),
+                        scope: o.scope == null ? null : String(o.scope),
+                    });
+                },
                 switchTo: (identifier, project) => dispatch('worktrees.switch', {
                     identifier: String(identifier),
                     project: project == null ? null : String(project),
                 }),
                 refresh:  (project)             => dispatch('worktrees.refresh', { project: project == null ? null : String(project) }),
+            };
+            muxy.navigation = {
+                focus: (o) => dispatch('navigation.focus', { paneID: String((o || {}).paneID || '') }),
             };
     """
 
@@ -421,6 +434,7 @@ public enum ExtensionBridgeJS {
             muxy.git = {
                 status:        (o) => dispatch('git.status', {
                     project: gitProject(o),
+                    worktree: (o || {}).worktree == null ? null : String(o.worktree),
                     local: Boolean((o || {}).local),
                     fresh: Boolean((o || {}).fresh),
                 }),
@@ -480,8 +494,16 @@ public enum ExtensionBridgeJS {
                     }),
                 },
                 pr: {
-                    info:   (o) => dispatch('git.pr.info', { project: gitProject(o), fresh: Boolean((o || {}).fresh) }),
-                    number: (o) => dispatch('git.pr.number', { project: gitProject(o), fresh: Boolean((o || {}).fresh) }),
+                    info:   (o) => dispatch('git.pr.info', {
+                        project: gitProject(o),
+                        worktree: (o || {}).worktree == null ? null : String(o.worktree),
+                        fresh: Boolean((o || {}).fresh),
+                    }),
+                    number: (o) => dispatch('git.pr.number', {
+                        project: gitProject(o),
+                        worktree: (o || {}).worktree == null ? null : String(o.worktree),
+                        fresh: Boolean((o || {}).fresh),
+                    }),
                     diff:   (o) => dispatch('git.pr.diff', {
                         project: gitProject(o),
                         number: Number((o || {}).number),
@@ -496,6 +518,7 @@ public enum ExtensionBridgeJS {
                     }),
                     list:   (o) => dispatch('git.pr.list', {
                         project: gitProject(o),
+                        worktree: (o || {}).worktree == null ? null : String(o.worktree),
                         filter: (o || {}).filter == null ? null : String(o.filter),
                         limit: (o || {}).limit == null ? null : Number(o.limit),
                         checks: (o || {}).checks == null ? null : Boolean(o.checks),
@@ -536,7 +559,7 @@ public enum ExtensionBridgeJS {
 
     private static let agentsBlock = """
             muxy.agents = {
-                list: () => dispatch('agents.list', {}),
+                list: (o) => dispatch('agents.list', { scope: (o || {}).scope == null ? null : String(o.scope) }),
             };
     """
 

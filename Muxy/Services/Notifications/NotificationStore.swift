@@ -100,13 +100,16 @@ final class NotificationStore {
 
     func markAsRead(tabID: UUID) {
         var changed = false
+        var keys = Set<WorktreeKey>()
         for notification in notifications where !notification.isRead && notification.tabID == tabID {
             notification.isRead = true
             changed = true
+            keys.insert(WorktreeKey(projectID: notification.projectID, worktreeID: notification.worktreeID))
         }
         if changed {
             readStateVersion += 1
             scheduleSave()
+            broadcastChanged(keys)
         }
     }
 
@@ -189,10 +192,16 @@ final class NotificationStore {
         }
 
         notifications.insert(notification, at: 0)
-        trimIfNeeded()
+        var changedKeys = trimIfNeeded()
         scheduleSave()
         deliverNotification(notification, desktopDeliveryIngress: desktopDeliveryIngress)
         broadcastExtensionEvent(notification)
+        let worktreeKey = WorktreeKey(
+            projectID: notification.projectID,
+            worktreeID: notification.worktreeID
+        )
+        changedKeys.insert(worktreeKey)
+        broadcastChanged(changedKeys)
     }
 
     private func broadcastExtensionEvent(_ notification: MuxyNotification) {
@@ -284,50 +293,81 @@ final class NotificationStore {
     }
 
     func markAsRead(_ id: UUID) {
-        guard let index = notifications.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = notifications.firstIndex(where: { $0.id == id && !$0.isRead }) else { return }
+        let key = WorktreeKey(
+            projectID: notifications[index].projectID,
+            worktreeID: notifications[index].worktreeID
+        )
         notifications[index].isRead = true
         readStateVersion += 1
         scheduleSave()
+        broadcastChanged(Set([key]))
     }
 
     func markAllAsRead() {
         var changed = false
+        var keys = Set<WorktreeKey>()
         for notification in notifications where !notification.isRead {
             notification.isRead = true
             changed = true
+            keys.insert(WorktreeKey(projectID: notification.projectID, worktreeID: notification.worktreeID))
         }
         if changed {
             readStateVersion += 1
             scheduleSave()
+            broadcastChanged(keys)
         }
     }
 
     func markAllAsRead(projectID: UUID) {
         var changed = false
+        var keys = Set<WorktreeKey>()
         for notification in notifications where !notification.isRead && notification.projectID == projectID {
             notification.isRead = true
             changed = true
+            keys.insert(WorktreeKey(projectID: notification.projectID, worktreeID: notification.worktreeID))
         }
         if changed {
             readStateVersion += 1
             scheduleSave()
+            broadcastChanged(keys)
         }
     }
 
     func remove(_ id: UUID) {
+        let keys = Set(notifications.filter { $0.id == id && !$0.isRead }.map {
+            WorktreeKey(projectID: $0.projectID, worktreeID: $0.worktreeID)
+        })
         notifications.removeAll { $0.id == id }
         scheduleSave()
+        broadcastChanged(keys)
     }
 
     func clear() {
+        let keys = Set(notifications.filter { !$0.isRead }.map {
+            WorktreeKey(projectID: $0.projectID, worktreeID: $0.worktreeID)
+        })
         notifications.removeAll()
         pendingDesktopDeliveries.removeAll()
         scheduleSave()
+        broadcastChanged(keys)
     }
 
-    private func trimIfNeeded() {
-        guard notifications.count > Self.maxNotifications else { return }
-        notifications = Array(notifications.prefix(Self.maxNotifications))
+    private func trimIfNeeded() -> Set<WorktreeKey> {
+        let result = Self.trimming(notifications, to: Self.maxNotifications)
+        notifications = result.kept
+        return result.removedUnreadKeys
+    }
+
+    static func trimming(
+        _ notifications: [MuxyNotification],
+        to limit: Int
+    ) -> (kept: [MuxyNotification], removedUnreadKeys: Set<WorktreeKey>) {
+        guard notifications.count > limit else { return (notifications, []) }
+        let removedUnreadKeys = Set(notifications.dropFirst(limit).lazy.filter { !$0.isRead }.map {
+            WorktreeKey(projectID: $0.projectID, worktreeID: $0.worktreeID)
+        })
+        return (Array(notifications.prefix(limit)), removedUnreadKeys)
     }
 
     private func scheduleSave() {
@@ -336,6 +376,18 @@ final class NotificationStore {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             self?.saveToDisk()
+        }
+    }
+
+    private func broadcastChanged(_ keys: Set<WorktreeKey>) {
+        for key in keys {
+            NotificationSocketServer.shared.broadcast(event: ExtensionEvent(
+                name: ExtensionEventName.notificationsChanged,
+                payload: [
+                    "projectID": key.projectID.uuidString,
+                    "worktreeID": key.worktreeID.uuidString,
+                ]
+            ))
         }
     }
 

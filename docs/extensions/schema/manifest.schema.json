@@ -162,6 +162,8 @@
         "worktrees:read",
         "worktrees:write",
         "agents:read",
+        "notifications:read",
+        "navigation:write",
         "git:read",
         "git:write",
         "gh:read",

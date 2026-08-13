@@ -45,4 +45,8 @@ enum ExtensionEventName {
     static let notificationPosted = "notification.posted"
     static let fileChanged = "file.changed"
     static let agentStatus = "agent.status"
+    static let agentsChanged = "agents.changed"
+    static let notificationsChanged = "notifications.changed"
+    static let worktreesChanged = "worktrees.changed"
+    static let repositoryChanged = "repository.changed"
 }

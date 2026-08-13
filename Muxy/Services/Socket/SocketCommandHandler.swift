@@ -144,7 +144,8 @@ enum SocketCommandHandler {
                     identifier: parts.dropFirst().joined(separator: "|"),
                     appState: appState,
                     projectStore: projectStore,
-                    worktreeStore: worktreeStore
+                    worktreeStore: worktreeStore,
+                    projectGroupStore: projectGroupStore
                 ),
                 ok: "ok"
             )
@@ -155,7 +156,8 @@ enum SocketCommandHandler {
                 projectIdentifier: identifier,
                 appState: appState,
                 projectStore: projectStore,
-                worktreeStore: worktreeStore
+                worktreeStore: worktreeStore,
+                projectGroupStore: projectGroupStore
             )) { worktrees in
                 worktrees.map { worktree in
                     "\(worktree.id.uuidString)\t\(worktree.name)\t\(worktree.path)\t\(worktree.branch ?? "")\t\(worktree.isActive)"
@@ -180,7 +182,8 @@ enum SocketCommandHandler {
                     projectIdentifier: projectIdentifier,
                     appState: appState,
                     projectStore: projectStore,
-                    worktreeStore: worktreeStore
+                    worktreeStore: worktreeStore,
+                    projectGroupStore: projectGroupStore
                 ),
                 ok: "ok"
             )
@@ -547,7 +550,10 @@ enum SocketCommandHandler {
              "storage.keys",
              "shortcuts.register",
              "shortcuts.unregister",
-             "shortcuts.list":
+             "shortcuts.list",
+             "agents.list",
+             "notifications.unreadCounts",
+             "gh.user":
             guard parts.count >= 2 else { return "error:usage \(cmd)|<base64-json>" }
             guard let extensionID = clientContext.extensionID else { return "error:identify required" }
             return await handleAPIVerb(

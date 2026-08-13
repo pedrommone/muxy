@@ -7,11 +7,16 @@ final class ExtensionFileEventEmitter: @unchecked Sendable {
     private let lock = NSLock()
     private var lastEmitted: [String: TimeInterval] = [:]
 
-    static func emit(paths: [String], projectPath: String) {
-        shared.emit(paths: paths, projectPath: projectPath)
+    static func emit(
+        paths: [String],
+        projectPath: String,
+        projectID: UUID? = nil,
+        worktreeID: UUID? = nil
+    ) {
+        shared.emit(paths: paths, projectPath: projectPath, projectID: projectID, worktreeID: worktreeID)
     }
 
-    func emit(paths: [String], projectPath: String) {
+    func emit(paths: [String], projectPath: String, projectID: UUID?, worktreeID: UUID?) {
         let now = ProcessInfo.processInfo.systemUptime
         let fresh = deduplicate(paths: paths, projectPath: projectPath, now: now)
         guard !fresh.isEmpty else { return }
@@ -26,6 +31,14 @@ final class ExtensionFileEventEmitter: @unchecked Sendable {
                 ]
             ))
         }
+        guard let projectID, let worktreeID else { return }
+        server.broadcast(event: ExtensionEvent(
+            name: ExtensionEventName.repositoryChanged,
+            payload: [
+                "projectID": projectID.uuidString,
+                "worktreeID": worktreeID.uuidString,
+            ]
+        ))
     }
 
     private func deduplicate(paths: [String], projectPath: String, now: TimeInterval) -> [String] {

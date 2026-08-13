@@ -318,7 +318,15 @@ enum MuxyAPIDispatcher {
         case let browserVerb where browserVerb.hasPrefix("browser."):
             return try await handleBrowserAutomation(verb: browserVerb, args: args, context: context)
         case "agents.list":
-            return MuxyAPI.Agents.list().map(agentDict)
+            return MuxyAPI.Agents.list(paneScope: args["scope"] as? String == "pane").map(agentDict)
+        case "notifications.unreadCounts":
+            return unreadCountsDict(MuxyAPI.Notifications.unreadCounts())
+        case "navigation.focus":
+            try unwrap(MuxyAPI.Navigation.focus(
+                paneIDString: stringArg(args, "paneID"),
+                appState: context.appState
+            ))
+            return NSNull()
         case "panes.list":
             return MuxyAPI.Panes.list(appState: context.appState).map(paneDict)
         case "panes.send":
@@ -360,6 +368,14 @@ enum MuxyAPIDispatcher {
             return NSNull()
         case "projects.list":
             guard let projectStore = context.projectStore else { throw APIError.projectStoreUnavailable }
+            if args["scope"] as? String == "all" {
+                guard let projectGroupStore = context.projectGroupStore else { throw APIError.projectStoreUnavailable }
+                return MuxyAPI.Projects.listAll(
+                    appState: context.appState,
+                    projectStore: projectStore,
+                    projectGroupStore: projectGroupStore
+                ).map(projectDict)
+            }
             return MuxyAPI.Projects.list(appState: context.appState, projectStore: projectStore).map(projectDict)
         case "projects.switch":
             guard let projectStore = context.projectStore,
@@ -369,7 +385,8 @@ enum MuxyAPIDispatcher {
                 identifier: stringArg(args, "identifier"),
                 appState: context.appState,
                 projectStore: projectStore,
-                worktreeStore: worktreeStore
+                worktreeStore: worktreeStore,
+                projectGroupStore: context.projectGroupStore
             ))
             return NSNull()
         case "projects.delete":
@@ -493,11 +510,21 @@ enum MuxyAPIDispatcher {
             guard let projectStore = context.projectStore,
                   let worktreeStore = context.worktreeStore
             else { throw APIError.worktreeStoreUnavailable }
+            if args["scope"] as? String == "all" {
+                guard let projectGroupStore = context.projectGroupStore else { throw APIError.projectStoreUnavailable }
+                return MuxyAPI.Worktrees.listAll(
+                    appState: context.appState,
+                    projectStore: projectStore,
+                    worktreeStore: worktreeStore,
+                    projectGroupStore: projectGroupStore
+                ).map(worktreeDict)
+            }
             return try unwrap(MuxyAPI.Worktrees.list(
                 projectIdentifier: args["project"] as? String,
                 appState: context.appState,
                 projectStore: projectStore,
-                worktreeStore: worktreeStore
+                worktreeStore: worktreeStore,
+                projectGroupStore: context.projectGroupStore
             )).map(worktreeDict)
         case "worktrees.switch":
             guard let projectStore = context.projectStore,
@@ -508,7 +535,8 @@ enum MuxyAPIDispatcher {
                 projectIdentifier: args["project"] as? String,
                 appState: context.appState,
                 projectStore: projectStore,
-                worktreeStore: worktreeStore
+                worktreeStore: worktreeStore,
+                projectGroupStore: context.projectGroupStore
             ))
             return NSNull()
         case "worktrees.refresh":
@@ -886,12 +914,14 @@ enum MuxyAPIDispatcher {
             projectGroupStore: projectGroupStore
         )
         let project = args["project"] as? String
+        let worktree = args["worktree"] as? String
         let fresh = args["fresh"] as? Bool ?? false
 
         switch verb {
         case "git.status":
             return try await GitDTO.status(unwrap(MuxyAPI.Git.status(
                 projectIdentifier: project,
+                worktreeIdentifier: worktree,
                 local: args["local"] as? Bool ?? false,
                 fresh: fresh,
                 context: git
@@ -926,10 +956,20 @@ enum MuxyAPIDispatcher {
         case "git.aheadBehind":
             return try await GitDTO.aheadBehind(unwrap(MuxyAPI.Git.aheadBehind(projectIdentifier: project, fresh: fresh, context: git)))
         case "git.pr.info":
-            let info = try await unwrap(MuxyAPI.Git.pullRequestInfo(projectIdentifier: project, fresh: fresh, context: git))
+            let info = try await unwrap(MuxyAPI.Git.pullRequestInfo(
+                projectIdentifier: project,
+                worktreeIdentifier: worktree,
+                fresh: fresh,
+                context: git
+            ))
             return info.map(GitDTO.prInfo) ?? NSNull()
         case "git.pr.number":
-            let number = try await unwrap(MuxyAPI.Git.pullRequestNumber(projectIdentifier: project, fresh: fresh, context: git))
+            let number = try await unwrap(MuxyAPI.Git.pullRequestNumber(
+                projectIdentifier: project,
+                worktreeIdentifier: worktree,
+                fresh: fresh,
+                context: git
+            ))
             return number ?? NSNull()
         case "git.pr.diff":
             return try await GitDTO.rawDiff(unwrap(MuxyAPI.Git.pullRequestDiff(
@@ -942,6 +982,7 @@ enum MuxyAPIDispatcher {
         case "git.pr.list":
             return try await unwrap(MuxyAPI.Git.pullRequestList(
                 projectIdentifier: project,
+                worktreeIdentifier: worktree,
                 filter: prListFilter(args["filter"] as? String),
                 limit: intArg(args, "limit") ?? 100,
                 includeChecks: boolArg(args, "checks") ?? true,
@@ -1296,14 +1337,17 @@ enum MuxyAPIDispatcher {
         ]
     }
 
-    private static func agentDict(_ agent: AgentInfo) -> [String: String] {
-        AgentStatusStore.eventPayload(
+    private static func agentDict(_ agent: AgentInfo) -> [String: Any] {
+        var payload: [String: Any] = AgentStatusStore.eventPayload(
             worktreeID: agent.worktreeID,
             projectID: agent.projectID,
             paneID: agent.paneID,
             providerID: agent.providerID,
             status: agent.status
         )
+        payload["updatedAt"] = agent.updatedAt.ISO8601Format()
+        payload["completionPending"] = agent.completionPending
+        return payload
     }
 
     private static func paneDict(_ pane: PaneInfo) -> [String: Any] {
@@ -1312,6 +1356,10 @@ enum MuxyAPIDispatcher {
             "title": pane.title,
             "workingDirectory": pane.workingDirectory,
             "isFocused": pane.isFocused,
+            "projectID": pane.projectID.uuidString,
+            "worktreeID": pane.worktreeID.uuidString,
+            "areaID": pane.areaID.uuidString,
+            "tabID": pane.tabID.uuidString,
         ]
     }
 
@@ -1326,6 +1374,12 @@ enum MuxyAPIDispatcher {
             "icon": project.icon ?? NSNull(),
             "logo": project.logo ?? NSNull(),
             "worktreesEnabled": project.worktreesEnabled,
+            "workspaceID": project.workspaceID?.uuidString ?? NSNull(),
+            "workspaceName": project.workspaceName ?? NSNull(),
+            "workspaceKind": project.workspaceKind.rawValue,
+            "isRemote": project.isRemote,
+            "isHome": project.isHome,
+            "lastActiveAt": project.lastActiveAt?.ISO8601Format() ?? NSNull(),
         ]
     }
 
@@ -1336,6 +1390,25 @@ enum MuxyAPIDispatcher {
             "path": worktree.path,
             "branch": worktree.branch ?? NSNull(),
             "isActive": worktree.isActive,
+            "projectID": worktree.projectID.uuidString,
+            "isOpen": worktree.isOpen,
+            "lastActiveAt": worktree.lastActiveAt?.ISO8601Format() ?? NSNull(),
+        ]
+    }
+
+    private static func unreadCountsDict(_ counts: UnreadCountsInfo) -> [String: Any] {
+        [
+            "total": counts.total,
+            "projects": counts.projects.map {
+                ["projectID": $0.projectID.uuidString, "unreadCount": $0.unreadCount]
+            },
+            "worktrees": counts.worktrees.map {
+                [
+                    "projectID": $0.projectID.uuidString,
+                    "worktreeID": $0.worktreeID.uuidString,
+                    "unreadCount": $0.unreadCount,
+                ]
+            },
         ]
     }
 

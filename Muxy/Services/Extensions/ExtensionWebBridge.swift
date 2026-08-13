@@ -177,6 +177,7 @@ enum ExtensionWebBridge {
                 },
                 notifications: {
                     notify(opts) { return send('notifications.notify', opts || {}); },
+                    unreadCounts() { return send('notifications.unreadCounts', {}); },
                 },
                 tabs: {
                     open(request) { return send('tabs.open', request || {}); },
@@ -212,7 +213,7 @@ enum ExtensionWebBridge {
                     rename(paneID, title) { return send('panes.rename', { paneID, title: String(title) }); },
                 },
                 projects: {
-                    list() { return send('projects.list', {}); },
+                    list(opts) { return send('projects.list', { scope: (opts || {}).scope == null ? null : String(opts.scope) }); },
                     switchTo(identifier) { return send('projects.switch', { identifier: String(identifier) }); },
                     delete(identifier) { return send('projects.delete', { identifier: String(identifier) }); },
                     add(path) { return send('projects.add', { path: String(path) }); },
@@ -426,7 +427,14 @@ enum ExtensionWebBridge {
                     },
                 },
                 worktrees: {
-                    list(project) { return send('worktrees.list', { project: project == null ? null : String(project) }); },
+                    list(projectOrOptions) {
+                        const o = projectOrOptions && typeof projectOrOptions === 'object' ? projectOrOptions : {};
+                        const project = projectOrOptions && typeof projectOrOptions !== 'object' ? projectOrOptions : o.project;
+                        return send('worktrees.list', {
+                            project: project == null ? null : String(project),
+                            scope: o.scope == null ? null : String(o.scope),
+                        });
+                    },
                     switchTo(identifier, project) {
                         return send('worktrees.switch', {
                             identifier: String(identifier),
@@ -436,7 +444,10 @@ enum ExtensionWebBridge {
                     refresh(project) { return send('worktrees.refresh', { project: project == null ? null : String(project) }); },
                 },
                 agents: {
-                    list() { return send('agents.list', {}); },
+                    list(opts) { return send('agents.list', { scope: (opts || {}).scope == null ? null : String(opts.scope) }); },
+                },
+                navigation: {
+                    focus(opts) { return send('navigation.focus', { paneID: String((opts || {}).paneID || '') }); },
                 },
                 gh: {
                     user() { return send('gh.user', {}); },
@@ -444,6 +455,7 @@ enum ExtensionWebBridge {
                 git: {
                     status(o) { return send('git.status', {
                         project: gitProject(o),
+                        worktree: (o || {}).worktree == null ? null : String(o.worktree),
                         local: Boolean((o || {}).local),
                         fresh: Boolean((o || {}).fresh),
                     }); },
@@ -511,8 +523,16 @@ enum ExtensionWebBridge {
                         }); },
                     },
                     pr: {
-                        info(o) { return send('git.pr.info', { project: gitProject(o), fresh: Boolean((o || {}).fresh) }); },
-                        number(o) { return send('git.pr.number', { project: gitProject(o), fresh: Boolean((o || {}).fresh) }); },
+                        info(o) { return send('git.pr.info', {
+                            project: gitProject(o),
+                            worktree: (o || {}).worktree == null ? null : String(o.worktree),
+                            fresh: Boolean((o || {}).fresh),
+                        }); },
+                        number(o) { return send('git.pr.number', {
+                            project: gitProject(o),
+                            worktree: (o || {}).worktree == null ? null : String(o.worktree),
+                            fresh: Boolean((o || {}).fresh),
+                        }); },
                         diff(o) { return send('git.pr.diff', {
                             project: gitProject(o),
                             number: Number((o || {}).number),
@@ -527,6 +547,7 @@ enum ExtensionWebBridge {
                         }); },
                         list(o) { return send('git.pr.list', {
                             project: gitProject(o),
+                            worktree: (o || {}).worktree == null ? null : String(o.worktree),
                             filter: (o || {}).filter == null ? null : String(o.filter),
                             limit: (o || {}).limit == null ? null : Number(o.limit),
                             checks: (o || {}).checks == null ? null : Boolean(o.checks),
@@ -638,6 +659,7 @@ enum ExtensionWebBridge {
             };
 
             Object.freeze(muxy.notifications);
+            Object.freeze(muxy.navigation);
             Object.freeze(muxy.tabs);
             Object.freeze(muxy.browser);
             Object.freeze(muxy.panes);

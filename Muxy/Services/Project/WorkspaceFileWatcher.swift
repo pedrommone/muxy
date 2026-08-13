@@ -18,7 +18,12 @@ final class WorkspaceFileWatcher {
         watcher = nil
         guard let root else { return }
         watcher = FileSystemWatcher(directoryPath: root.path) { changedPaths in
-            ExtensionFileEventEmitter.emit(paths: changedPaths, projectPath: root.path)
+            ExtensionFileEventEmitter.emit(
+                paths: changedPaths,
+                projectPath: root.path,
+                projectID: root.projectID,
+                worktreeID: root.worktreeID
+            )
             WorkspaceFilesChange(
                 projectID: root.projectID,
                 worktreeID: root.worktreeID,

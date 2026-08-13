@@ -27,6 +27,117 @@ struct MuxyAPIProjectManagementPermissionTests {
 @Suite("MuxyAPI project management routing")
 @MainActor
 struct MuxyAPIProjectManagementRoutingTests {
+    @Test("switch resolves remote projects and activates their workspace")
+    func switchResolvesRemoteProject() throws {
+        let env = ProjectManagementEnvironment()
+        let workspace = env.projectGroupStore.addRemoteWorkspace(name: "Remote", deviceID: UUID())
+        let remote = try #require(env.projectGroupStore.addRemoteProject(
+            name: "API",
+            path: "/srv/api",
+            toGroup: workspace.id
+        ))
+        let project = remote.asProject(workspaceID: workspace.id, sortOrder: 0)
+        env.worktreeStore.ensurePrimary(for: project)
+
+        let result = MuxyAPI.Projects.switchTo(
+            identifier: project.id.uuidString,
+            appState: env.appState,
+            projectStore: env.projectStore,
+            worktreeStore: env.worktreeStore,
+            projectGroupStore: env.projectGroupStore
+        )
+
+        #expect(isSuccess(result))
+        #expect(env.projectGroupStore.activeGroupID == workspace.id)
+        #expect(env.appState.activeProjectID == project.id)
+    }
+
+    @Test("worktree navigation resolves a remote project returned by aggregate APIs")
+    func worktreeNavigationResolvesRemoteProject() throws {
+        let env = ProjectManagementEnvironment()
+        let workspace = env.projectGroupStore.addRemoteWorkspace(name: "Remote", deviceID: UUID())
+        let remote = try #require(env.projectGroupStore.addRemoteProject(
+            name: "API",
+            path: "/srv/api",
+            toGroup: workspace.id
+        ))
+        let project = remote.asProject(workspaceID: workspace.id, sortOrder: 0)
+        env.worktreeStore.ensurePrimary(for: project)
+
+        let result = MuxyAPI.Worktrees.list(
+            projectIdentifier: project.id.uuidString,
+            appState: env.appState,
+            projectStore: env.projectStore,
+            worktreeStore: env.worktreeStore,
+            projectGroupStore: env.projectGroupStore
+        )
+
+        guard case let .success(worktrees) = result else {
+            Issue.record("expected remote worktrees")
+            return
+        }
+        #expect(worktrees.count == 1)
+        let worktree = try #require(worktrees.first)
+        #expect(worktree.projectID == project.id)
+
+        let switchResult = MuxyAPI.Worktrees.switchTo(
+            identifier: worktree.id.uuidString,
+            projectIdentifier: project.id.uuidString,
+            appState: env.appState,
+            projectStore: env.projectStore,
+            worktreeStore: env.worktreeStore,
+            projectGroupStore: env.projectGroupStore
+        )
+
+        #expect(isSuccess(switchResult))
+        #expect(env.projectGroupStore.activeGroupID == workspace.id)
+        #expect(env.appState.activeProjectID == project.id)
+        #expect(env.appState.activeWorktreeID[project.id] == worktree.id)
+    }
+
+    @Test("aggregate lists include local and remote workspace context")
+    func aggregateListsIncludeWorkspaceContext() throws {
+        let local = Project(name: "Local", path: "/tmp/local")
+        let env = ProjectManagementEnvironment(projects: [local])
+        env.projectGroupStore.addGroup(name: "Local Workspace")
+        let localWorkspace = try #require(env.projectGroupStore.groups.first)
+        #expect(env.projectGroupStore.addProject(projectID: local.id, toGroup: localWorkspace.id))
+
+        let remoteWorkspace = env.projectGroupStore.addRemoteWorkspace(name: "Remote Workspace", deviceID: UUID())
+        let remote = try #require(env.projectGroupStore.addRemoteProject(
+            name: "Remote",
+            path: "/srv/remote",
+            toGroup: remoteWorkspace.id
+        )).asProject(workspaceID: remoteWorkspace.id, sortOrder: 0)
+        env.worktreeStore.ensurePrimary(for: local)
+        env.worktreeStore.ensurePrimary(for: remote)
+        let localWorktree = try #require(env.worktreeStore.primary(for: local.id))
+        env.appState.selectWorktree(projectID: local.id, worktree: localWorktree)
+
+        let projects = MuxyAPI.Projects.listAll(
+            appState: env.appState,
+            projectStore: env.projectStore,
+            projectGroupStore: env.projectGroupStore
+        )
+        let worktrees = MuxyAPI.Worktrees.listAll(
+            appState: env.appState,
+            projectStore: env.projectStore,
+            worktreeStore: env.worktreeStore,
+            projectGroupStore: env.projectGroupStore
+        )
+
+        let localInfo = try #require(projects.first { $0.id == local.id })
+        #expect(localInfo.workspaceID == localWorkspace.id)
+        #expect(localInfo.workspaceName == "Local Workspace")
+        #expect(localInfo.workspaceKind == .local)
+        let remoteInfo = try #require(projects.first { $0.id == remote.id })
+        #expect(remoteInfo.workspaceID == remoteWorkspace.id)
+        #expect(remoteInfo.workspaceName == "Remote Workspace")
+        #expect(remoteInfo.workspaceKind == .ssh)
+        #expect(worktrees.first { $0.projectID == local.id }?.isOpen == true)
+        #expect(worktrees.first { $0.projectID == remote.id }?.isOpen == false)
+    }
+
     @Test("rename mutates the resolved project and persists")
     func renameMutatesProject() {
         let project = Project(name: "Repo", path: "/tmp/muxy-rename-\(UUID().uuidString)")

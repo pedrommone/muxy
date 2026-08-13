@@ -102,6 +102,9 @@ final class HostBridge: @unchecked Sendable {
             return dispatchNotify(dict)
         case "dialog.confirm",
              "dialog.alert",
+             "agents.list",
+             "notifications.unreadCounts",
+             "gh.user",
              "modal.open",
              "modal.feed",
              "modal.finish",

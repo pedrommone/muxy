@@ -27,6 +27,30 @@ struct ExtensionFileEventEmitterTests {
         #expect(Set(events.map { $0.payload["path"] ?? "" }) == ["/per-path-repo/a.txt", "/per-path-repo/b.txt"])
     }
 
+    @Test("emits repository context supplied by the watcher")
+    func emitsRepositoryContext() async {
+        let collector = EventCollector()
+        let token = NotificationSocketServer.shared.addInProcessObserver { event in
+            collector.add(event)
+        }
+        defer { NotificationSocketServer.shared.removeInProcessObserver(token) }
+        let projectID = UUID()
+        let worktreeID = UUID()
+
+        ExtensionFileEventEmitter.emit(
+            paths: ["/repository-context/a.txt"],
+            projectPath: "/repository-context",
+            projectID: projectID,
+            worktreeID: worktreeID
+        )
+
+        let delivered = await waitFor(timeout: 2.0) {
+            collector.repositoryEvents(projectID: projectID).count == 1
+        }
+        #expect(delivered)
+        #expect(collector.repositoryEvents(projectID: projectID).first?.payload["worktreeID"] == worktreeID.uuidString)
+    }
+
     @Test("emits nothing for an empty path list")
     func emitsNothingWhenEmpty() async {
         let collector = EventCollector()
@@ -90,5 +114,14 @@ private final class EventCollector: @unchecked Sendable {
 
     func count(forProjectPath projectPath: String) -> Int {
         events(forProjectPath: projectPath).count
+    }
+
+    func repositoryEvents(projectID: UUID) -> [ExtensionEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events.filter {
+            $0.name == ExtensionEventName.repositoryChanged
+                && $0.payload["projectID"] == projectID.uuidString
+        }
     }
 }

@@ -25,11 +25,19 @@ extension MuxyAPI {
 
         static func status(
             projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             local: Bool,
             fresh: Bool,
             context: Context
         ) async -> Result<GitStatusSnapshot, APIError> {
-            await cachedRead(projectIdentifier, context, endpoint: "status", params: "local=\(local)", fresh: fresh) { repoPath, git in
+            await cachedRead(
+                projectIdentifier,
+                worktreeIdentifier: worktreeIdentifier,
+                context,
+                endpoint: "status",
+                params: "local=\(local)",
+                fresh: fresh
+            ) { repoPath, git in
                 try await GitStatusAggregator.snapshot(
                     repoPath: repoPath,
                     includePullRequest: !local,
@@ -158,10 +166,17 @@ extension MuxyAPI {
 
         static func pullRequestInfo(
             projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             fresh: Bool,
             context: Context
         ) async -> Result<GitRepositoryService.PRInfo?, APIError> {
-            await cachedRead(projectIdentifier, context, endpoint: "pr.info", fresh: fresh) { repoPath, git in
+            await cachedRead(
+                projectIdentifier,
+                worktreeIdentifier: worktreeIdentifier,
+                context,
+                endpoint: "pr.info",
+                fresh: fresh
+            ) { repoPath, git in
                 let branch = try await git.currentBranch(repoPath: repoPath)
                 let headSha = await git.headSha(repoPath: repoPath) ?? branch
                 let result = await git.cachedPullRequestInfo(
@@ -177,10 +192,17 @@ extension MuxyAPI {
 
         static func pullRequestNumber(
             projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             fresh: Bool,
             context: Context
         ) async -> Result<Int?, APIError> {
-            await cachedRead(projectIdentifier, context, endpoint: "pr.number", fresh: fresh) { repoPath, git in
+            await cachedRead(
+                projectIdentifier,
+                worktreeIdentifier: worktreeIdentifier,
+                context,
+                endpoint: "pr.number",
+                fresh: fresh
+            ) { repoPath, git in
                 let branch = try await git.currentBranch(repoPath: repoPath)
                 return await git.pullRequestNumber(repoPath: repoPath, branch: branch)
             }
@@ -210,12 +232,13 @@ extension MuxyAPI {
 
         static func pullRequestList(
             projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             filter: GitRepositoryService.PRListFilter,
             limit: Int,
             includeChecks: Bool,
             context: Context
         ) async -> Result<[GitRepositoryService.PRListItem], APIError> {
-            await read(projectIdentifier, context) { repoPath, git in
+            await read(projectIdentifier, worktreeIdentifier: worktreeIdentifier, context) { repoPath, git in
                 try await git.listPullRequests(
                     repoPath: repoPath,
                     filter: filter,
@@ -686,10 +709,16 @@ extension MuxyAPI {
 
         private static func read<T: Sendable>(
             _ projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             _ context: Context,
             _ work: (String, GitRepositoryService) async throws -> T
         ) async -> Result<T, APIError> {
-            guard let resolved = resolveRepo(projectIdentifier, context: context) else {
+            guard let resolved = resolveRepo(
+                projectIdentifier,
+                worktreeIdentifier: worktreeIdentifier,
+                context: context
+            )
+            else {
                 return .failure(.projectNotFound(projectIdentifier ?? ""))
             }
             do {
@@ -701,13 +730,19 @@ extension MuxyAPI {
 
         private static func cachedRead<T: Sendable>(
             _ projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             _ context: Context,
             endpoint: String,
             params: String = "",
             fresh: Bool,
             _ work: (String, GitRepositoryService) async throws -> T
         ) async -> Result<T, APIError> {
-            guard let resolved = resolveRepo(projectIdentifier, context: context) else {
+            guard let resolved = resolveRepo(
+                projectIdentifier,
+                worktreeIdentifier: worktreeIdentifier,
+                context: context
+            )
+            else {
                 return .failure(.projectNotFound(projectIdentifier ?? ""))
             }
             let key = GitMetadataCache.ReadKey(repoPath: resolved.path, endpoint: endpoint, params: params)
@@ -765,6 +800,7 @@ extension MuxyAPI {
 
         private static func resolveRepo(
             _ projectIdentifier: String?,
+            worktreeIdentifier: String? = nil,
             context: Context
         ) -> (path: String, git: GitRepositoryService)? {
             guard let project = context.projectGroupStore.resolveProject(
@@ -773,13 +809,39 @@ extension MuxyAPI {
                 activeProjectID: context.appState.activeProjectID
             )
             else { return nil }
-            let git = GitRepositoryService(context: context.projectGroupStore.workspaceContext(for: project))
+            guard let workspaceContext = context.projectGroupStore.resolvedWorkspaceContext(for: project) else {
+                return nil
+            }
+            let git = GitRepositoryService(context: workspaceContext)
+            if let worktreeIdentifier, !worktreeIdentifier.isEmpty {
+                guard let worktree = resolveWorktree(
+                    worktreeIdentifier,
+                    in: context.worktreeStore.list(for: project.id),
+                    context: workspaceContext
+                )
+                else { return nil }
+                return (worktree.path, git)
+            }
             if let worktreeID = context.appState.activeWorktreeID[project.id],
                let worktree = context.worktreeStore.worktree(projectID: project.id, worktreeID: worktreeID)
             {
                 return (worktree.path, git)
             }
             return (project.path, git)
+        }
+
+        private static func resolveWorktree(
+            _ identifier: String,
+            in worktrees: [Worktree],
+            context: WorkspaceContext
+        ) -> Worktree? {
+            let canonicalPath = GitWorktreeService.canonicalPath(identifier, context: context)
+            return worktrees.first {
+                $0.id.uuidString.caseInsensitiveCompare(identifier) == .orderedSame
+                    || $0.name.localizedCaseInsensitiveCompare(identifier) == .orderedSame
+                    || $0.branch?.localizedCaseInsensitiveCompare(identifier) == .orderedSame
+                    || GitWorktreeService.canonicalPath($0.path, context: context) == canonicalPath
+            }
         }
     }
 }

@@ -214,6 +214,42 @@ struct NotificationStoreTests {
         #expect(desktopNotifier.delivered.count == 2)
     }
 
+    @Test("trimming returns unread worktrees removed from the retained window")
+    func trimmingReturnsRemovedUnreadWorktrees() {
+        let retained = makeNotification(projectID: UUID(), worktreeID: UUID())
+        let unreadProjectID = UUID()
+        let unreadWorktreeID = UUID()
+        let unread = makeNotification(projectID: unreadProjectID, worktreeID: unreadWorktreeID)
+        let read = makeNotification(projectID: UUID(), worktreeID: UUID(), isRead: true)
+
+        let result = NotificationStore.trimming([retained, unread, read], to: 1)
+
+        #expect(result.kept.map(\.id) == [retained.id])
+        #expect(result.removedUnreadKeys == [WorktreeKey(
+            projectID: unreadProjectID,
+            worktreeID: unreadWorktreeID
+        )])
+    }
+
+    private func makeNotification(
+        projectID: UUID,
+        worktreeID: UUID,
+        isRead: Bool = false
+    ) -> MuxyNotification {
+        MuxyNotification(
+            paneID: UUID(),
+            projectID: projectID,
+            worktreeID: worktreeID,
+            areaID: UUID(),
+            tabID: UUID(),
+            worktreePath: "/tmp/repo",
+            source: .socket,
+            title: "Title",
+            body: "Body",
+            isRead: isRead
+        )
+    }
+
     private func addNotification(
         source: MuxyNotification.Source,
         context: NavigationContext,

@@ -66,6 +66,10 @@ struct PaneInfo: Equatable {
     let title: String
     let workingDirectory: String
     let isFocused: Bool
+    let projectID: UUID
+    let worktreeID: UUID
+    let areaID: UUID
+    let tabID: UUID
 }
 
 struct ProjectInfo: Equatable {
@@ -78,6 +82,12 @@ struct ProjectInfo: Equatable {
     let icon: String?
     let logo: String?
     let worktreesEnabled: Bool
+    let workspaceID: UUID?
+    let workspaceName: String?
+    let workspaceKind: WorkspaceType
+    let isRemote: Bool
+    let isHome: Bool
+    let lastActiveAt: Date?
 }
 
 struct WorktreeInfo: Equatable {
@@ -86,6 +96,9 @@ struct WorktreeInfo: Equatable {
     let path: String
     let branch: String?
     let isActive: Bool
+    let projectID: UUID
+    let isOpen: Bool
+    let lastActiveAt: Date?
 }
 
 struct AgentInfo: Equatable {
@@ -94,6 +107,25 @@ struct AgentInfo: Equatable {
     let paneID: UUID
     let providerID: String
     let status: AgentStatus
+    let updatedAt: Date
+    let completionPending: Bool
+}
+
+struct UnreadProjectInfo: Equatable {
+    let projectID: UUID
+    let unreadCount: Int
+}
+
+struct UnreadWorktreeInfo: Equatable {
+    let projectID: UUID
+    let worktreeID: UUID
+    let unreadCount: Int
+}
+
+struct UnreadCountsInfo: Equatable {
+    let total: Int
+    let projects: [UnreadProjectInfo]
+    let worktrees: [UnreadWorktreeInfo]
 }
 
 struct TabInfo: Equatable {
@@ -247,6 +279,8 @@ enum MuxyAPI {
         private static let extensionVerbs: Set<String> = Set([
             "exec",
             "agents.list",
+            "notifications.unreadCounts",
+            "navigation.focus",
             "http.fetch",
             "dialog.confirm",
             "dialog.alert",
@@ -509,6 +543,8 @@ enum MuxyAPI {
             "workspaces.rename": .projectsWrite,
             "workspaces.delete": .projectsWrite,
             "agents.list": .agentsRead,
+            "notifications.unreadCounts": .notificationsRead,
+            "navigation.focus": .navigationWrite,
             "git.status": .gitRead,
             "git.diff": .gitRead,
             "git.repoInfo": .gitRead,
@@ -577,6 +613,10 @@ enum MuxyAPI {
 
         private static let eventPermissions: [String: ExtensionPermission] = [
             ExtensionEventName.agentStatus: .agentsRead,
+            ExtensionEventName.agentsChanged: .agentsRead,
+            ExtensionEventName.notificationsChanged: .notificationsRead,
+            ExtensionEventName.worktreesChanged: .worktreesRead,
+            ExtensionEventName.repositoryChanged: .gitRead,
             ExtensionEventName.fileChanged: .filesRead,
             ExtensionEventName.projectsChanged: .projectsRead,
             ExtensionEventName.worktreeHeadChanged: .worktreesRead,
@@ -852,7 +892,11 @@ enum MuxyAPI {
                             id: pane.id,
                             title: title,
                             workingDirectory: cwd,
-                            isFocused: isFocused
+                            isFocused: isFocused,
+                            projectID: key.projectID,
+                            worktreeID: key.worktreeID,
+                            areaID: area.id,
+                            tabID: tab.id
                         ))
                     }
                 }
@@ -873,29 +917,83 @@ enum MuxyAPI {
 
         static func list(appState: AppState, projectStore: ProjectStore) -> [ProjectInfo] {
             projectStore.projects.map { project in
-                ProjectInfo(
-                    id: project.id,
-                    name: project.name,
-                    path: project.path,
-                    isActive: project.id == appState.activeProjectID,
-                    sortOrder: project.sortOrder,
-                    iconColor: project.iconColor,
-                    icon: project.icon,
-                    logo: project.logo,
-                    worktreesEnabled: project.worktreesEnabled
+                projectInfo(project, appState: appState)
+            }
+        }
+
+        static func listAll(
+            appState: AppState,
+            projectStore: ProjectStore,
+            projectGroupStore: ProjectGroupStore
+        ) -> [ProjectInfo] {
+            let local = projectStore.projects.map { project in
+                let group = projectGroupStore.groups.first { $0.projectIDs.contains(project.id) }
+                return projectInfo(
+                    project,
+                    appState: appState,
+                    workspaceID: group?.id,
+                    workspaceName: group?.name,
+                    workspaceKind: group?.type ?? .local
                 )
             }
+            let remote = projectGroupStore.remoteProjects.map { project in
+                let group = project.remoteWorkspaceID.flatMap { workspaceID in
+                    projectGroupStore.groups.first { $0.id == workspaceID }
+                }
+                return projectInfo(
+                    project,
+                    appState: appState,
+                    workspaceID: group?.id,
+                    workspaceName: group?.name,
+                    workspaceKind: .ssh
+                )
+            }
+            return local + remote
+        }
+
+        private static func projectInfo(
+            _ project: Project,
+            appState: AppState,
+            workspaceID: UUID? = nil,
+            workspaceName: String? = nil,
+            workspaceKind: WorkspaceType = .local
+        ) -> ProjectInfo {
+            ProjectInfo(
+                id: project.id,
+                name: project.name,
+                path: project.path,
+                isActive: project.id == appState.activeProjectID,
+                sortOrder: project.sortOrder,
+                iconColor: project.iconColor,
+                icon: project.icon,
+                logo: project.logo,
+                worktreesEnabled: project.worktreesEnabled,
+                workspaceID: workspaceID,
+                workspaceName: workspaceName,
+                workspaceKind: workspaceKind,
+                isRemote: project.isRemote,
+                isHome: project.isHome,
+                lastActiveAt: project.lastActiveAt
+            )
         }
 
         static func switchTo(
             identifier: String,
             appState: AppState,
             projectStore: ProjectStore,
-            worktreeStore: WorktreeStore
+            worktreeStore: WorktreeStore,
+            projectGroupStore: ProjectGroupStore? = nil
         ) -> Result<Void, APIError> {
-            guard let project = findProject(identifier, in: projectStore.projects) else {
+            let project = projectGroupStore?.resolveProject(
+                identifier: identifier,
+                localProjects: projectStore.projects,
+                activeProjectID: appState.activeProjectID
+            ) ?? findProject(identifier, in: projectStore.projects)
+            guard let project else {
                 return .failure(.projectNotFound(identifier))
             }
+            projectGroupStore?.activateWorkspace(containing: project)
+            worktreeStore.ensurePrimary(for: project)
             guard let worktree = worktreeStore.preferred(
                 for: project.id,
                 matching: appState.activeWorktreeID[project.id]
@@ -1206,9 +1304,15 @@ enum MuxyAPI {
             projectIdentifier: String?,
             appState: AppState,
             projectStore: ProjectStore,
-            worktreeStore: WorktreeStore
+            worktreeStore: WorktreeStore,
+            projectGroupStore: ProjectGroupStore? = nil
         ) -> Result<[WorktreeInfo], APIError> {
-            guard let project = resolveProject(projectIdentifier, appState: appState, projectStore: projectStore) else {
+            let project = projectGroupStore?.resolveProject(
+                identifier: projectIdentifier,
+                localProjects: projectStore.projects,
+                activeProjectID: appState.activeProjectID
+            ) ?? resolveProject(projectIdentifier, appState: appState, projectStore: projectStore)
+            guard let project else {
                 return .failure(.projectNotFound(projectIdentifier ?? ""))
             }
             let infos = worktreeStore.list(for: project.id).map { worktree in
@@ -1219,10 +1323,41 @@ enum MuxyAPI {
                     name: worktree.name,
                     path: worktree.path,
                     branch: worktree.branch,
-                    isActive: isActive
+                    isActive: isActive,
+                    projectID: project.id,
+                    isOpen: appState.workspaceRoots[WorktreeKey(
+                        projectID: project.id,
+                        worktreeID: worktree.id
+                    )] != nil,
+                    lastActiveAt: worktree.lastActiveAt
                 )
             }
             return .success(infos)
+        }
+
+        static func listAll(
+            appState: AppState,
+            projectStore: ProjectStore,
+            worktreeStore: WorktreeStore,
+            projectGroupStore: ProjectGroupStore
+        ) -> [WorktreeInfo] {
+            let projects = projectStore.projects + projectGroupStore.remoteProjects
+            return projects.flatMap { project in
+                worktreeStore.list(for: project.id).map { worktree in
+                    let key = WorktreeKey(projectID: project.id, worktreeID: worktree.id)
+                    return WorktreeInfo(
+                        id: worktree.id,
+                        name: worktree.name,
+                        path: worktree.path,
+                        branch: worktree.branch,
+                        isActive: appState.activeProjectID == project.id
+                            && appState.activeWorktreeID[project.id] == worktree.id,
+                        projectID: project.id,
+                        isOpen: appState.workspaceRoots[key] != nil,
+                        lastActiveAt: worktree.lastActiveAt
+                    )
+                }
+            }
         }
 
         static func switchTo(
@@ -1230,14 +1365,21 @@ enum MuxyAPI {
             projectIdentifier: String?,
             appState: AppState,
             projectStore: ProjectStore,
-            worktreeStore: WorktreeStore
+            worktreeStore: WorktreeStore,
+            projectGroupStore: ProjectGroupStore? = nil
         ) -> Result<Void, APIError> {
-            guard let project = resolveProject(projectIdentifier, appState: appState, projectStore: projectStore) else {
+            let project = projectGroupStore?.resolveProject(
+                identifier: projectIdentifier,
+                localProjects: projectStore.projects,
+                activeProjectID: appState.activeProjectID
+            ) ?? resolveProject(projectIdentifier, appState: appState, projectStore: projectStore)
+            guard let project else {
                 return .failure(.projectNotFound(projectIdentifier ?? ""))
             }
             guard let worktree = findWorktree(identifier, in: worktreeStore.list(for: project.id)) else {
                 return .failure(.worktreeNotFound(identifier))
             }
+            projectGroupStore?.activateWorkspace(containing: project)
             appState.selectWorktree(projectID: project.id, worktree: worktree)
             return .success(())
         }
@@ -1413,16 +1555,66 @@ enum MuxyAPI {
 
     @MainActor
     enum Agents {
-        static func list() -> [AgentInfo] {
-            AgentStatusStore.shared.entries.values.map { entry in
+        static func list(paneScope: Bool = false) -> [AgentInfo] {
+            let store = AgentStatusStore.shared
+            let entries = paneScope ? store.paneEntries() : Array(store.entries.values)
+            return entries.sorted { $0.paneID.uuidString < $1.paneID.uuidString }.map { entry in
                 AgentInfo(
                     worktreeID: entry.worktreeID,
                     projectID: entry.projectID,
                     paneID: entry.paneID,
                     providerID: entry.providerID,
-                    status: entry.status
+                    status: entry.status,
+                    updatedAt: entry.updatedAt,
+                    completionPending: store.isCompletionPending(forPane: entry.paneID)
                 )
             }
+        }
+    }
+
+    @MainActor
+    enum Notifications {
+        static func unreadCounts() -> UnreadCountsInfo {
+            let notifications = NotificationStore.shared.notifications.filter { !$0.isRead }
+            let projects = Dictionary(grouping: notifications, by: \.projectID)
+                .map { UnreadProjectInfo(projectID: $0.key, unreadCount: $0.value.count) }
+                .sorted { $0.projectID.uuidString < $1.projectID.uuidString }
+            let worktrees = Dictionary(grouping: notifications) {
+                WorktreeKey(projectID: $0.projectID, worktreeID: $0.worktreeID)
+            }
+            .map {
+                UnreadWorktreeInfo(
+                    projectID: $0.key.projectID,
+                    worktreeID: $0.key.worktreeID,
+                    unreadCount: $0.value.count
+                )
+            }
+            .sorted {
+                if $0.projectID != $1.projectID {
+                    return $0.projectID.uuidString < $1.projectID.uuidString
+                }
+                return $0.worktreeID.uuidString < $1.worktreeID.uuidString
+            }
+            return UnreadCountsInfo(total: notifications.count, projects: projects, worktrees: worktrees)
+        }
+    }
+
+    @MainActor
+    enum Navigation {
+        static func focus(paneIDString: String, appState: AppState) -> Result<Void, APIError> {
+            guard let paneID = UUID(uuidString: paneIDString) else {
+                return .failure(.invalidPaneID)
+            }
+            guard let location = locateTab(paneID: paneID, appState: appState) else {
+                return .failure(.paneNotFound(paneIDString))
+            }
+            appState.dispatch(.navigate(
+                projectID: location.key.projectID,
+                worktreeID: location.key.worktreeID,
+                areaID: location.areaID,
+                tabID: location.tabID
+            ))
+            return .success(())
         }
     }
 

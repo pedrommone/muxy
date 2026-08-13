@@ -162,6 +162,7 @@ final class AgentStatusStore {
         appliedSequence.removeValue(forKey: paneID)
         completionPending.remove(paneID)
         guard let removed = panes.removeValue(forKey: paneID) else { return }
+        broadcastChanged(removed)
         recompute(worktreeID: removed.worktreeID)
     }
 
@@ -214,12 +215,25 @@ final class AgentStatusStore {
     }
 
     func clearCompletion(for paneID: UUID) {
-        completionPending.remove(paneID)
+        guard completionPending.remove(paneID) != nil, let entry = panes[paneID] else { return }
+        broadcastChanged(entry)
     }
 
     func status(forPane paneID: UUID?) -> AgentStatus? {
         guard let paneID else { return nil }
         return panes[paneID]?.status
+    }
+
+    func paneEntries() -> [Entry] {
+        panes.values.sorted {
+            if $0.projectID != $1.projectID {
+                return $0.projectID.uuidString < $1.projectID.uuidString
+            }
+            if $0.worktreeID != $1.worktreeID {
+                return $0.worktreeID.uuidString < $1.worktreeID.uuidString
+            }
+            return $0.paneID.uuidString < $1.paneID.uuidString
+        }
     }
 
     func activeProviderID(forPane paneID: UUID?) -> String? {
@@ -320,6 +334,7 @@ final class AgentStatusStore {
         let existingStatus = panes[entry.paneID]?.status
         panes[entry.paneID] = entry
         updateCompletion(paneID: entry.paneID, from: existingStatus, to: entry.status)
+        broadcastChanged(entry)
         recompute(worktreeID: entry.worktreeID)
     }
 
@@ -381,6 +396,17 @@ final class AgentStatusStore {
                 providerID: providerID,
                 status: status
             )
+        ))
+    }
+
+    private func broadcastChanged(_ entry: Entry) {
+        NotificationSocketServer.shared.broadcast(event: ExtensionEvent(
+            name: ExtensionEventName.agentsChanged,
+            payload: [
+                "projectID": entry.projectID.uuidString,
+                "worktreeID": entry.worktreeID.uuidString,
+                "paneID": entry.paneID.uuidString,
+            ]
         ))
     }
 

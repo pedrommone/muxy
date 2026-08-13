@@ -30,10 +30,20 @@ struct ExtensionVerbRoutingTests {
         #expect(MuxyAPI.Permissions.required(for: "toast") == .notificationsWrite)
     }
 
+    @Test("overview reads and navigation require dedicated permissions")
+    func overviewVerbsRequireDedicatedPermissions() {
+        #expect(MuxyAPI.Permissions.required(for: "notifications.unreadCounts") == .notificationsRead)
+        #expect(MuxyAPI.Permissions.required(for: "navigation.focus") == .navigationWrite)
+    }
+
     @Test("agent.status and file.changed events require their read permission")
     func gatedEventsRequireReadPermission() {
         #expect(MuxyAPI.Permissions.required(forEvent: ExtensionEventName.agentStatus) == .agentsRead)
         #expect(MuxyAPI.Permissions.required(forEvent: ExtensionEventName.fileChanged) == .filesRead)
+        #expect(MuxyAPI.Permissions.required(forEvent: ExtensionEventName.agentsChanged) == .agentsRead)
+        #expect(MuxyAPI.Permissions.required(forEvent: ExtensionEventName.notificationsChanged) == .notificationsRead)
+        #expect(MuxyAPI.Permissions.required(forEvent: ExtensionEventName.worktreesChanged) == .worktreesRead)
+        #expect(MuxyAPI.Permissions.required(forEvent: ExtensionEventName.repositoryChanged) == .gitRead)
     }
 
     @Test("ungated events require no permission")

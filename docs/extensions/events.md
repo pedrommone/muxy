@@ -36,8 +36,8 @@ muxy.events.subscribe('extension.refresh.request', async () => {
 
 ## Subscribing
 
-- **Workspace events** (`pane.*`, `tab.*`, `panel.*`, `popover.*`, `project.*`, `projects.changed`, `worktree.*`, `notification.posted`, `agent.status`, `file.changed`) must be listed in your manifest `events` array before you can subscribe. Subscribing to anything not declared is rejected.
-- **Permission-gated events** also require their read permission to subscribe: `projects.changed` needs `projects:read`, `agent.status` needs `agents:read`, `file.changed` needs `files:read`. Declaring the event without the permission is rejected.
+- **Workspace events** (`pane.*`, `tab.*`, `panel.*`, `popover.*`, `project.*`, `projects.changed`, `worktree.*`, `worktrees.changed`, `notification.posted`, `notifications.changed`, `agent.status`, `agents.changed`, `repository.changed`, `file.changed`) must be listed in your manifest `events` array before you can subscribe. Subscribing to anything not declared is rejected.
+- **Permission-gated events** also require their read permission to subscribe: `projects.changed` needs `projects:read`; `agent.status` and `agents.changed` need `agents:read`; `notifications.changed` needs `notifications:read`; `worktree.headChanged` and `worktrees.changed` need `worktrees:read`; `repository.changed` needs `git:read`; and `file.changed` needs `files:read`. Declaring the event without the permission is rejected.
 - **Command events** (`command.<id>`) are auto-allowed: declaring a command in `manifest.commands` is implicit consent to receive its trigger, so you do not add it to `events`.
 - **Extension-local events** (`extension.*`) are auto-allowed for the same extension. They are not workspace events, do not appear in `events`, and cannot cross extension boundaries.
 
@@ -73,6 +73,10 @@ When an extension is reloaded or disabled, its subscriptions are dropped and re-
 | `worktree.headChanged` | `projectID`, `worktreeID`, `branch`, `path` | `events: ["worktree.headChanged"]` + `worktrees:read` |
 | `notification.posted` | `paneID`, `projectID`, `worktreeID`, `worktreePath`, `tabID`, `source`, `title`, `body` | `events: ["notification.posted"]` |
 | `agent.status` | `worktreeID`, `projectID`, `paneID`, `providerID`, `status` | `events: ["agent.status"]` + `agents:read` |
+| `agents.changed` | `projectID`, `worktreeID`, `paneID` | `events: ["agents.changed"]` + `agents:read` |
+| `notifications.changed` | `projectID`, `worktreeID` | `events: ["notifications.changed"]` + `notifications:read` |
+| `worktrees.changed` | `projectID`, optionally `worktreeID` | `events: ["worktrees.changed"]` + `worktrees:read` |
+| `repository.changed` | `projectID`, `worktreeID` | `events: ["repository.changed"]` + `git:read` |
 | `file.changed` | `path`, `projectPath` | `events: ["file.changed"]` + `files:read` |
 | `command.<id>` | `command`, `extension` | Auto-allowed when `commands[].id == <id>` |
 | `extension.<name>` | JSON payload from emitter | Auto-allowed same-extension local event |
@@ -81,9 +85,13 @@ When an extension is reloaded or disabled, its subscriptions are dropped and re-
 
 `worktree.offline` aggregates terminal sleep state across one worktree, so an extension holding a worktree-scoped resource (a dev server, a container, a watcher) does not need to track panes itself. It fires with `offline: "true"` only when **every** terminal pane in the worktree is offline, and with `offline: "false"` again when any pane wakes, when a new terminal pane is created in that worktree, or when the worktree's last terminal pane closes. Those last two cases matter: a sleeping worktree that gains a live terminal — or loses its terminals entirely — is no longer asleep, so a paired `offline: "false"` always follows an `offline: "true"`. It carries `worktreePath` alongside the identifiers, so a `background.js` listener can act on the worktree directly — background scripts have no `muxy.worktrees.list()`.
 
-`projects.changed` fires whenever the project list changes — a project is added, renamed, recolored, re-iconed, reordered, or removed — whether the change came from Muxy's own UI or from an extension verb. It carries no payload; webviews can call [`muxy.projects.list()`](permissions.md) to refetch the current list, while background scripts should notify a webview through an `extension.*` event.
+`projects.changed` fires whenever the local or remote project list changes — a project or workspace is added, renamed, recolored, re-iconed, reordered, or removed — whether the change came from Muxy's own UI or from an extension verb. It carries no payload; webviews can call [`muxy.projects.list()`](permissions.md) to refetch the current list, while background scripts should notify a webview through an `extension.*` event.
 
 `agent.status` reports an AI coding agent's lifecycle per worktree, driven by the provider's hooks: `working` when a prompt is submitted or the agent runs a tool, `waiting` when the agent needs attention, `idle` when a turn finishes, is cancelled, or its session ends. `providerID` identifies the agent (e.g. `claude`). When a worktree holds several agent panes, the reported status is the most active one (`working` > `waiting` > `idle`) and `paneID` points to the pane that owns it. It fires only when the worktree status changes, and turns `idle` once the last agent pane in the worktree closes. The native UI keeps a separate pending-completion indicator after an active status becomes idle; `idle` remains the stable extension API value. Pair it with [`muxy.agents.list()`](permissions.md) to hydrate current statuses on load.
+
+`agents.changed` is the pane-level invalidation event. It also fires when completion becomes pending or is cleared. Refetch `muxy.agents.list({ scope: "pane" })`; the aggregate `agent.status` contract remains unchanged.
+
+`notifications.changed`, `worktrees.changed`, and `repository.changed` identify stale source data. `repository.changed` watches the active local worktree; refresh other visible worktrees lazily when navigation or the other invalidation events make them stale. Refetch through the corresponding read API instead of treating event payloads as durable state.
 
 Which states a provider reports depends on the hooks its CLI exposes:
 
