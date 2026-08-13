@@ -84,7 +84,7 @@ struct ExtensionManifestTests {
         #expect(command.action.requiredPermission == .panelsWrite)
     }
 
-    @Test("decodes home views")
+    @Test("decodes home views and openHome commands")
     func decodesHomeViews() throws {
         let json = #"""
         {
@@ -98,17 +98,30 @@ struct ExtensionManifestTests {
                     "entry": "overview/index.html",
                     "defaultData": { "showIdle": false }
                 }
+            ],
+            "commands": [
+                {
+                    "id": "open-overview",
+                    "title": "Open Overview",
+                    "action": {
+                        "kind": "openHome",
+                        "homeView": "board"
+                    }
+                }
             ]
         }
         """#
 
         let manifest = try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
         let home = try #require(manifest.homeViews.first)
+        let command = try #require(manifest.commands.first)
 
         #expect(home.id == "board")
         #expect(home.title == "Overview")
         #expect(home.entry == "overview/index.html")
         #expect(home.defaultData == .object(["showIdle": .bool(false)]))
+        #expect(command.action == .openHome(homeView: "board", data: nil))
+        #expect(command.action.requiredPermission == nil)
     }
 
     @Test("openModal defaults dismissOnOutsideClick to true when omitted")
@@ -1646,6 +1659,13 @@ struct ExtensionManifestTests {
                 "version": "1.0.0",
                 "homeViews": [
                     { "id": "overview", "title": "Overview", "entry": "overview/index.html" }
+                ],
+                "commands": [
+                    {
+                        "id": "open",
+                        "title": "Open",
+                        "action": { "kind": "openHome", "homeView": "overview" }
+                    }
                 ]
             }
             """,
@@ -1675,6 +1695,33 @@ struct ExtensionManifestTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         #expect(throws: ExtensionLoadError.homeViewEmptyTitle(homeViewID: "overview")) {
+            try ExtensionManifestLoader.load(from: directory)
+        }
+    }
+
+    @Test("rejects openHome commands with an unknown home view")
+    func rejectsUnknownHomeViewCommand() throws {
+        let directory = try makeTemporaryExtension(
+            manifest: """
+            {
+                "name": "unknown-home",
+                "version": "1.0.0",
+                "commands": [
+                    {
+                        "id": "open",
+                        "title": "Open",
+                        "action": { "kind": "openHome", "homeView": "missing" }
+                    }
+                ]
+            }
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        #expect(throws: ExtensionLoadError.commandReferencesUnknownHomeView(
+            commandID: "open",
+            homeView: "missing"
+        )) {
             try ExtensionManifestLoader.load(from: directory)
         }
     }

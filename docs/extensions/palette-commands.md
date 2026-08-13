@@ -64,6 +64,7 @@ Registering/unregistering needs the `shortcuts:register` permission. An `id` tha
 | --- | --- | --- |
 | `event` | Fires `command.<id>` to your extension. Default if `action` is omitted. | — |
 | `openTab` | Opens an extension webview tab of the named type. | `tabType` (required, must reference a declared [tab type](tabs.md)); `data` (optional JSON merged into `window.muxy.data`). |
+| `openHome` | Opens a global extension home view outside project tab restoration. | `homeView` (required, must reference a declared [home view](home-views.md)); `data` (optional JSON exposed through `window.muxy.data`). |
 | `togglePanel` | Toggles an extension [panel](panels.md) open/closed. | `panel` (required, must reference a declared panel id). |
 | `openPopover` | Toggles an extension [popover](popovers.md) anchored to its topbar/status-bar item. | `popover` (required, must reference a declared popover id). |
 | `openModal` | Opens a self-contained [webview modal](modal.md#opening-from-a-shortcut-openmodal) rendering your HTML — a form, info, a list, or anything. The modal does its own work and closes itself; no result is returned here (use `background.js` + `muxy.modal.openWebview` when you need the result or dynamic data). Requires `panels:write`. | `entry` (required, HTML asset inside the extension); `width`, `height`, `dismissOnOutsideClick`, `data` (all optional). |

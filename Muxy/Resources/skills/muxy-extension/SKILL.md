@@ -19,6 +19,7 @@ The goal of everything below: an extension should be indistinguishable from a na
 
 ## Pick the right surface
 
+- **A global dashboard or operational overview outside project tab restoration** → a **`homeViews`** contribution. Open it with an `openHome` command. Users explicitly choose a launch view in Settings, and the persistent Home button reopens it.
 - **Showing something to the user** → a **UI page** (tab, panel, or popover). Page scripts get the full `window.muxy` API.
 - **A persistent, full-height navigation or control surface that replaces the built-in left sidebar** → a **`sidebar`** (one per extension; the user selects it in Settings → Sidebar). It fills the entire region — the project list *and* the footer — so own your own navigation. Same `window.muxy` API and theme variables as a panel.
 - **Reacting durably to events, coordinating multiple webviews, or running shell commands headlessly** → a **`background.js`** script. It can also call `muxy.tabs.open` to show a result in the active workspace. Most extensions don't need one.
@@ -26,6 +27,8 @@ The goal of everything below: an extension should be indistinguishable from a na
 - **Your own HTML in a modal on a keypress** (a form, info, a list, or mixed — not just forms) → a **webview modal** (`muxy.modal.openWebview`). A top-centered omnibox-style overlay rendering your HTML. Reach for it over the native `muxy.modal.open` picker when a list won't express what you need. **Prefer opening it from `background.js`** — it's always running, so a shortcut works with nothing else on screen, and you can pass dynamic `data` and `await` the result. Use the declarative `openModal` command action only for a static, self-contained modal that needs no result and no `background.js`. The modal returns a value via `muxy.modal.submitWebview(value)` only if the opener wants one; an informational modal just calls `muxy.lifecycle.close()`.
 
 Don't open a hidden tab to run logic, and don't put durable event-driven work in tab JS where closing the tab loses it. Use `muxy.events.emit('extension.<name>', payload)` plus a background listener when a webview needs to ask background.js for shared or long-lived work.
+
+For an overview, hydrate with `projects.list({ scope: "all" })`, `worktrees.list({ scope: "all" })`, `agents.list({ scope: "pane" })`, and `notifications.unreadCounts()`. Subscribe to `agents.changed`, `notifications.changed`, `worktrees.changed`, and `repository.changed`, then refetch affected records. Do not poll every repository. Refresh visible stale cards with bounded concurrency and cached `git.status({ project, worktree })` calls. Use `navigation.focus({ paneID })` to return to the workspace and focus the exact pane.
 
 ## Theme — follow it, never hardcode
 

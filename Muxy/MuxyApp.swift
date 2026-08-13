@@ -48,6 +48,7 @@ struct MuxyApp: App {
             persistence: environment.projectGroupPersistence,
             remoteDeviceStore: remoteDeviceStore
         )
+        worktreeStore.loadAll(projects: projectGroupStore.remoteProjects)
         appState.restoreSelection(
             projects: projectStore.projects,
             worktrees: worktreeStore.worktrees,
@@ -175,8 +176,37 @@ struct MuxyApp: App {
                                 payload: [:]
                             ))
                         }
-                        appState.onProjectSelected = { [projectStore] projectID in
-                            projectStore.markActive(id: projectID)
+                        projectGroupStore.onProjectsChanged = {
+                            NotificationSocketServer.shared.broadcast(event: ExtensionEvent(
+                                name: ExtensionEventName.projectsChanged,
+                                payload: [:]
+                            ))
+                        }
+                        remoteDeviceStore.onDevicesChanged = {
+                            NotificationSocketServer.shared.broadcast(event: ExtensionEvent(
+                                name: ExtensionEventName.projectsChanged,
+                                payload: [:]
+                            ))
+                        }
+                        appState.onProjectSelected = { [projectStore, projectGroupStore] projectID in
+                            if projectStore.projects.contains(where: { $0.id == projectID }) {
+                                projectStore.markActive(id: projectID)
+                            } else {
+                                projectGroupStore.markRemoteProjectActive(id: projectID)
+                            }
+                        }
+                        appState.onWorktreeSelected = { [worktreeStore] projectID, worktreeID in
+                            worktreeStore.markActive(projectID: projectID, worktreeID: worktreeID)
+                        }
+                        worktreeStore.onWorktreesChanged = { projectID, worktreeID in
+                            var payload = ["projectID": projectID.uuidString]
+                            if let worktreeID {
+                                payload["worktreeID"] = worktreeID.uuidString
+                            }
+                            NotificationSocketServer.shared.broadcast(event: ExtensionEvent(
+                                name: ExtensionEventName.worktreesChanged,
+                                payload: payload
+                            ))
                         }
                         Task { @MainActor in
                             await Task.yield()

@@ -84,8 +84,10 @@ final class AppState {
     private let workspacePersistence: any WorkspacePersisting
     var onProjectsEmptied: (([UUID]) -> Void)?
     var onProjectSelected: ((UUID) -> Void)?
+    var onWorktreeSelected: ((UUID, UUID) -> Void)?
 
     var activeProjectID: UUID?
+    var activeExtensionHome: ExtensionHomeState?
 
     var activeWorktreeID: [UUID: UUID] = [:]
 
@@ -219,14 +221,74 @@ final class AppState {
     }
 
     func selectProject(_ project: Project, worktree: Worktree) {
-        let wasActive = activeProjectID == project.id
         dispatch(.selectProject(
             projectID: project.id,
             worktreeID: worktree.id,
             worktreePath: worktree.path
         ))
-        guard !wasActive else { return }
-        onProjectSelected?(project.id)
+    }
+
+    func presentExtensionHome(
+        extensionID: String,
+        homeView: ExtensionHomeView,
+        data: ExtensionJSON? = nil
+    ) {
+        if let activeExtensionHome,
+           activeExtensionHome.extensionID == extensionID,
+           activeExtensionHome.homeViewID == homeView.id
+        {
+            activeExtensionHome.data = data ?? homeView.defaultData
+            return
+        }
+        guard let activeExtensionHome else {
+            setExtensionHome(extensionID: extensionID, homeView: homeView, data: data)
+            return
+        }
+        requestDismissExtensionHome(instanceID: activeExtensionHome.id.uuidString) { [weak self] in
+            self?.setExtensionHome(extensionID: extensionID, homeView: homeView, data: data)
+        }
+    }
+
+    private func setExtensionHome(
+        extensionID: String,
+        homeView: ExtensionHomeView,
+        data: ExtensionJSON?
+    ) {
+        activeExtensionHome = ExtensionHomeState(
+            extensionID: extensionID,
+            homeViewID: homeView.id,
+            title: homeView.title,
+            data: data ?? homeView.defaultData
+        )
+    }
+
+    func requestDismissExtensionHome(
+        instanceID: String? = nil,
+        afterDismiss: (@MainActor () -> Void)? = nil
+    ) {
+        guard let activeExtensionHome else { return }
+        if let instanceID, activeExtensionHome.id.uuidString != instanceID {
+            return
+        }
+        let activeInstanceID = activeExtensionHome.id.uuidString
+        let surfaceKey = LifecycleSurfaceKey(kind: .home, instanceID: activeInstanceID)
+        Task { @MainActor in
+            let verdict = await ExtensionSurfaceBridgeRegistry.shared.requestBeforeClose(surfaceKey)
+            guard verdict == .allow,
+                  self.activeExtensionHome?.id.uuidString == activeInstanceID
+            else { return }
+            dismissExtensionHome(instanceID: activeInstanceID)
+            afterDismiss?()
+        }
+    }
+
+    func dismissExtensionHome(instanceID: String? = nil) {
+        guard let activeExtensionHome else { return }
+        if let instanceID, activeExtensionHome.id.uuidString != instanceID {
+            return
+        }
+        activeExtensionHome.surfaceStore.surface?.retire()
+        self.activeExtensionHome = nil
     }
 
     func selectWorktree(projectID: UUID, worktree: Worktree) {
@@ -897,6 +959,7 @@ final class AppState {
 
     @discardableResult
     func dispatchReturningEffects(_ action: Action) -> WorkspaceSideEffects {
+        dismissExtensionHome()
         let extensionSnapshot = ExtensionEventEmitter.snapshot(from: self)
         defer {
             let after = ExtensionEventEmitter.snapshot(from: self)
@@ -940,6 +1003,7 @@ final class AppState {
         let currentWorkspaceRootSignature = workspaceRootSignature(workspaceRoots)
         let currentTopLevelTabLayoutSignature = topLevelTabLayoutSignature(topLevelTabLayouts)
         let previousActiveProjectID = activeProjectID
+        let previousActiveWorktreeID = activeProjectID.flatMap { activeWorktreeID[$0] }
         var workspace = WorkspaceState(
             activeProjectID: activeProjectID,
             activeWorktreeID: activeWorktreeID,
@@ -960,6 +1024,15 @@ final class AppState {
         }
         if activeWorktreeID != workspace.activeWorktreeID {
             activeWorktreeID = workspace.activeWorktreeID
+        }
+        if previousActiveProjectID != activeProjectID, let activeProjectID {
+            onProjectSelected?(activeProjectID)
+        }
+        if let activeProjectID,
+           let currentWorktreeID = activeWorktreeID[activeProjectID],
+           previousActiveProjectID != activeProjectID || previousActiveWorktreeID != currentWorktreeID
+        {
+            onWorktreeSelected?(activeProjectID, currentWorktreeID)
         }
         if currentWorkspaceRootSignature != workspaceRootSignature(workspace.workspaceRoots) {
             workspaceRoots = workspace.workspaceRoots
@@ -1037,10 +1110,18 @@ final class AppState {
     }
 
     func goBack() {
+        guard activeExtensionHome == nil else {
+            requestDismissExtensionHome()
+            return
+        }
         step(delta: -1)
     }
 
     func goForward() {
+        guard activeExtensionHome == nil else {
+            requestDismissExtensionHome()
+            return
+        }
         step(delta: 1)
     }
 

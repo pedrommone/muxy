@@ -13,7 +13,7 @@ struct ExtensionWebView: NSViewRepresentable {
     let projectGroupStore: ProjectGroupStore?
     let focused: Bool
     var focusRestorationID: String?
-    var surfaceStore: ExtensionTabSurfaceStore?
+    var surfaceStore: ExtensionWebViewSurfaceStore?
 
     @Environment(BrowserProfileStore.self) private var browserProfileStore: BrowserProfileStore?
     @Environment(\.overlayActive) private var overlayActive
@@ -185,11 +185,11 @@ struct ExtensionWebView: NSViewRepresentable {
     final class MountCoordinator {
         let claimID = UUID()
         var surface: Surface?
-        weak var surfaceStore: ExtensionTabSurfaceStore?
+        weak var surfaceStore: ExtensionWebViewSurfaceStore?
     }
 
     @MainActor
-    final class Surface: ExtensionTabSurface {
+    final class Surface: ExtensionWebViewSurface {
         struct Identity: Equatable {
             let extensionID: String
             let surfaceKey: LifecycleSurfaceKey

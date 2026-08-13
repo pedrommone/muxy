@@ -437,6 +437,18 @@ final class ExtensionStore {
         }
     }
 
+    struct HomeViewBinding: Equatable, Identifiable {
+        let muxyExtension: MuxyExtension
+        let homeView: ExtensionHomeView
+
+        var id: String {
+            ExtensionHomePreference.value(
+                extensionID: muxyExtension.id,
+                homeViewID: homeView.id
+            )
+        }
+    }
+
     struct LocalizationBinding: Equatable, Identifiable {
         let muxyExtension: MuxyExtension
         let localization: ExtensionLocalization
@@ -501,6 +513,27 @@ final class ExtensionStore {
 
     func fileOpeners(for relativePath: String) -> [FileOpenerBinding] {
         fileOpeners().filter { $0.opener.matches(relativePath: relativePath) }
+    }
+
+    func homeViews() -> [HomeViewBinding] {
+        statuses
+            .filter(\.isEnabled)
+            .flatMap { status in
+                status.muxyExtension.manifest.homeViews.map {
+                    HomeViewBinding(muxyExtension: status.muxyExtension, homeView: $0)
+                }
+            }
+    }
+
+    func homeView(extensionID: String, homeViewID: String) -> HomeViewBinding? {
+        homeViews().first {
+            $0.muxyExtension.id == extensionID && $0.homeView.id == homeViewID
+        }
+    }
+
+    func preferredHomeView(value: String) -> HomeViewBinding? {
+        guard let selection = ExtensionHomePreference.parse(value) else { return nil }
+        return homeView(extensionID: selection.extensionID, homeViewID: selection.homeViewID)
     }
 
     func fileOpeners() -> [FileOpenerBinding] {
@@ -728,6 +761,13 @@ final class ExtensionStore {
                 data: data,
                 in: muxyExtension,
                 appState: invocation.appState
+            )
+        case let .openHome(homeViewID, data):
+            guard let homeView = muxyExtension.manifest.homeView(id: homeViewID) else { return }
+            invocation.appState.presentExtensionHome(
+                extensionID: invocation.extensionID,
+                homeView: homeView,
+                data: data
             )
         case let .togglePanel(panelID):
             guard let panel = muxyExtension.manifest.panel(id: panelID) else { return }

@@ -141,6 +141,8 @@ final class ExtensionBridgeHandler: NSObject, WKScriptMessageHandlerWithReply, B
             PopoverHost.shared.forceClose(instanceID: surfaceKey.instanceID)
         case .modalWebview:
             ExtensionWebviewModalService.shared.forceClose(instanceID: surfaceKey.instanceID)
+        case .home:
+            appState.dismissExtensionHome(instanceID: surfaceKey.instanceID)
         case .sidebar:
             break
         }

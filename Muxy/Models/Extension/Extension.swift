@@ -454,6 +454,7 @@ struct ExtensionModalAction: Equatable {
 enum ExtensionCommandAction: Codable, Equatable {
     case event
     case openTab(tabType: String, data: ExtensionJSON?)
+    case openHome(homeView: String, data: ExtensionJSON?)
     case togglePanel(panel: String)
     case openPopover(popover: String)
     case openModal(ExtensionModalAction)
@@ -470,6 +471,8 @@ enum ExtensionCommandAction: Codable, Equatable {
         switch self {
         case .event:
             nil
+        case .openHome:
+            nil
         case .openTab:
             .tabsWrite
         case .togglePanel,
@@ -484,6 +487,7 @@ enum ExtensionCommandAction: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case kind
         case tabType
+        case homeView
         case panel
         case popover
         case data
@@ -497,6 +501,7 @@ enum ExtensionCommandAction: Codable, Equatable {
     private enum Kind: String, Codable {
         case event
         case openTab
+        case openHome
         case togglePanel
         case openPopover
         case openModal
@@ -513,6 +518,10 @@ enum ExtensionCommandAction: Codable, Equatable {
             let tabType = try container.decode(String.self, forKey: .tabType)
             let data = try container.decodeIfPresent(ExtensionJSON.self, forKey: .data)
             self = .openTab(tabType: tabType, data: data)
+        case .openHome:
+            let homeView = try container.decode(String.self, forKey: .homeView)
+            let data = try container.decodeIfPresent(ExtensionJSON.self, forKey: .data)
+            self = .openHome(homeView: homeView, data: data)
         case .togglePanel:
             let panel = try container.decode(String.self, forKey: .panel)
             self = .togglePanel(panel: panel)
@@ -541,6 +550,10 @@ enum ExtensionCommandAction: Codable, Equatable {
         case let .openTab(tabType, data):
             try container.encode(Kind.openTab, forKey: .kind)
             try container.encode(tabType, forKey: .tabType)
+            try container.encodeIfPresent(data, forKey: .data)
+        case let .openHome(homeView, data):
+            try container.encode(Kind.openHome, forKey: .kind)
+            try container.encode(homeView, forKey: .homeView)
             try container.encodeIfPresent(data, forKey: .data)
         case let .togglePanel(panel):
             try container.encode(Kind.togglePanel, forKey: .kind)
@@ -946,6 +959,7 @@ enum ExtensionLoadError: LocalizedError, Equatable {
     case sidebarSVGMissing(sidebarID: String, url: URL)
     case sidebarSVGOutsideDirectory(sidebarID: String, url: URL)
     case commandReferencesUnknownTabType(commandID: String, tabType: String)
+    case commandReferencesUnknownHomeView(commandID: String, homeView: String)
     case commandReferencesUnknownPanel(commandID: String, panel: String)
     case commandReferencesUnknownPopover(commandID: String, popover: String)
     case commandModalEntryMissing(commandID: String, url: URL)
@@ -1063,6 +1077,8 @@ enum ExtensionLoadError: LocalizedError, Equatable {
             "Sidebar '\(sidebarID)' icon SVG at \(url.path) escapes the extension directory"
         case let .commandReferencesUnknownTabType(commandID, tabType):
             "Command '\(commandID)' references unknown tab type '\(tabType)'"
+        case let .commandReferencesUnknownHomeView(commandID, homeView):
+            "Command '\(commandID)' references unknown home view '\(homeView)'"
         case let .commandReferencesUnknownPanel(commandID, panel):
             "Command '\(commandID)' references unknown panel '\(panel)'"
         case let .commandReferencesUnknownPopover(commandID, popover):
@@ -1579,6 +1595,7 @@ enum ExtensionManifestLoader {
 
     private static func validateCommands(manifest: ExtensionManifest, in muxyExtension: MuxyExtension) throws {
         let tabTypeIDs = Set(manifest.tabTypes.map(\.id))
+        let homeViewIDs = Set(manifest.homeViews.map(\.id))
         let panelIDs = Set(manifest.panels.map(\.id))
         let popoverIDs = Set(manifest.popovers.map(\.id))
         for command in manifest.commands {
@@ -1590,6 +1607,13 @@ enum ExtensionManifestLoader {
                     throw ExtensionLoadError.commandReferencesUnknownTabType(
                         commandID: command.id,
                         tabType: tabType
+                    )
+                }
+            case let .openHome(homeView, _):
+                guard homeViewIDs.contains(homeView) else {
+                    throw ExtensionLoadError.commandReferencesUnknownHomeView(
+                        commandID: command.id,
+                        homeView: homeView
                     )
                 }
             case let .togglePanel(panel):

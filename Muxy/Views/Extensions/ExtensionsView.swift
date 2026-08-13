@@ -931,6 +931,7 @@ private struct ExtensionDetailPage: View {
         switch action {
         case .event: "event"
         case let .openTab(tabType, _): "opens \(tabType)"
+        case let .openHome(homeView, _): "opens \(homeView)"
         case let .togglePanel(panel): "toggles \(panel)"
         case let .openPopover(popover): "opens \(popover)"
         case let .openModal(modal): "opens modal \(modal.entry)"

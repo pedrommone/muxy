@@ -116,6 +116,8 @@ struct MainWindow: View {
     @State private var richInputPresentation = RichInputPresentationController()
     @State private var composerVoice = ComposerVoiceState()
     @State private var visitedWorktreeKeys: Set<WorktreeKey> = []
+    @State private var didPresentLaunchHome = false
+    @AppStorage(ExtensionHomePreference.storageKey) private var launchHomeView = ""
     @AppStorage(WorktreeListPreferences.orderByMRUKey)
     private var orderWorktreesByMRU = WorktreeListPreferences.defaultOrderByMRU
     @State private var showTerminalOmnibox = false
@@ -209,6 +211,8 @@ struct MainWindow: View {
                     restoreActiveTerminalFocus()
                 }
             }
+            .onAppear { presentLaunchHomeIfNeeded() }
+            .onChange(of: extensionStore.statuses) { reconcileActiveHome() }
     }
 
     private var windowColumns: some View {
@@ -503,7 +507,11 @@ struct MainWindow: View {
             Rectangle().fill(MuxyTheme.border).frame(height: 1)
                 .background(AppTransparencyBackground())
 
-            workspaceContent
+            if let home = appState.activeExtensionHome {
+                ExtensionHomeSurfaceView(state: home)
+            } else {
+                workspaceContent
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -629,9 +637,18 @@ struct MainWindow: View {
 
     private var navigationArrows: some View {
         HStack(spacing: UIMetrics.spacing1) {
+            if preferredHomeView != nil {
+                NavigationArrowButton(
+                    symbol: "house",
+                    isEnabled: appState.activeExtensionHome == nil,
+                    label: L10n.string("Open Home")
+                ) {
+                    presentPreferredHome()
+                }
+            }
             NavigationArrowButton(
                 symbol: "chevron.left",
-                isEnabled: appState.navigation.canGoBack,
+                isEnabled: appState.activeExtensionHome != nil || appState.navigation.canGoBack,
                 label: L10n.string("Back (\(KeyBindingStore.shared.combo(for: .navigateBack).displayString))")
             ) {
                 appState.goBack()
@@ -679,12 +696,28 @@ struct MainWindow: View {
 
     @ViewBuilder
     private var topBarContent: some View {
-        if showsTabsInTitleBar,
-           let project = activeProject,
-           let key = appState.activeWorktreeKey(for: project.id),
-           let layout = appState.topLevelTabLayouts[key],
-           layout.isSingleGroup,
-           let group = layout.allGroups().first
+        if let home = appState.activeExtensionHome {
+            HStack(spacing: 0) {
+                WindowDragRepresentable(alwaysEnabled: true)
+                    .overlay(alignment: .leading) {
+                        Text(home.title)
+                            .font(.system(size: UIMetrics.fontBody, weight: .semibold))
+                            .foregroundStyle(MuxyTheme.fgMuted)
+                            .padding(.leading, UIMetrics.spacing6)
+                            .allowsHitTesting(false)
+                    }
+                IconButton(symbol: "xmark", accessibilityLabel: L10n.string("Close Home")) {
+                    appState.requestDismissExtensionHome()
+                }
+                .padding(.trailing, UIMetrics.spacing2)
+            }
+            .frame(height: UIMetrics.scaled(32))
+        } else if showsTabsInTitleBar,
+                  let project = activeProject,
+                  let key = appState.activeWorktreeKey(for: project.id),
+                  let layout = appState.topLevelTabLayouts[key],
+                  layout.isSingleGroup,
+                  let group = layout.allGroups().first
         {
             TopLevelTabGroupStrip(
                 project: project,
@@ -1334,7 +1367,9 @@ struct MainWindow: View {
         trafficLightWidth + navigationArrowsWidth
     }
 
-    private var navigationArrowsWidth: CGFloat { UIMetrics.scaled(78) }
+    private var navigationArrowsWidth: CGFloat {
+        UIMetrics.scaled(preferredHomeView == nil ? 78 : 104)
+    }
 
     private var devModeBadge: some View {
         DebugButton()
@@ -1361,6 +1396,9 @@ struct MainWindow: View {
     }
 
     private var windowTitle: String {
+        if let home = appState.activeExtensionHome {
+            return "Muxy — \(home.title)"
+        }
         guard let project = activeProject else { return "Muxy" }
         guard let tabTitle = appState.activeTab(for: project.id)?.localizedTitle,
               !tabTitle.isEmpty
@@ -1539,12 +1577,14 @@ struct MainWindow: View {
     }
 
     private var isTerminalPaneFocused: Bool {
+        guard appState.activeExtensionHome == nil else { return false }
         guard let projectID = appState.activeProjectID else { return false }
         return appState.activeTab(for: projectID)?.content.pane != nil
     }
 
     private var isBrowserPaneFocused: Bool {
-        guard browserEnabled,
+        guard appState.activeExtensionHome == nil,
+              browserEnabled,
               let projectID = appState.activeProjectID
         else { return false }
         return appState.activeTab(for: projectID)?.content.browserState != nil
@@ -1839,8 +1879,37 @@ struct MainWindow: View {
     }
 
     private var activeTerminalPane: TerminalPaneState? {
+        guard appState.activeExtensionHome == nil else { return nil }
         guard let project = activeProject else { return nil }
         return appState.activeTab(for: project.id)?.content.pane
+    }
+
+    private var preferredHomeView: ExtensionStore.HomeViewBinding? {
+        extensionStore.preferredHomeView(value: launchHomeView)
+    }
+
+    private func presentPreferredHome() {
+        guard let preferredHomeView else { return }
+        appState.presentExtensionHome(
+            extensionID: preferredHomeView.muxyExtension.id,
+            homeView: preferredHomeView.homeView
+        )
+    }
+
+    private func presentLaunchHomeIfNeeded() {
+        guard !didPresentLaunchHome else { return }
+        didPresentLaunchHome = true
+        presentPreferredHome()
+    }
+
+    private func reconcileActiveHome() {
+        guard let active = appState.activeExtensionHome else { return }
+        guard extensionStore.homeView(
+            extensionID: active.extensionID,
+            homeViewID: active.homeViewID
+        ) == nil
+        else { return }
+        appState.dismissExtensionHome(instanceID: active.id.uuidString)
     }
 
     private var richInputPanelVisible: Bool {

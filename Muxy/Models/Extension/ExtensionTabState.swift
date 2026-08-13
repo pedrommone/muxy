@@ -1,13 +1,13 @@
 import Foundation
 
 @MainActor
-protocol ExtensionTabSurface: AnyObject {
+protocol ExtensionWebViewSurface: AnyObject {
     func retire()
 }
 
 @MainActor
-final class ExtensionTabSurfaceStore {
-    var surface: (any ExtensionTabSurface)?
+final class ExtensionWebViewSurfaceStore {
+    var surface: (any ExtensionWebViewSurface)?
 }
 
 @MainActor
@@ -17,7 +17,7 @@ final class ExtensionTabState: Identifiable {
     let extensionID: String
     let tabTypeID: String
     let projectPath: String
-    @ObservationIgnored let surfaceStore = ExtensionTabSurfaceStore()
+    @ObservationIgnored let surfaceStore = ExtensionWebViewSurfaceStore()
     var data: ExtensionJSON?
 
     var customTitle: String?

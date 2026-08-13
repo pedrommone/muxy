@@ -6,6 +6,7 @@ enum LifecycleSurfaceKind: String {
     case popover
     case sidebar
     case modalWebview
+    case home
 }
 
 struct LifecycleSurfaceKey: Hashable {

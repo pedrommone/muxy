@@ -34,6 +34,7 @@ struct InterfaceSettingsView: View {
     private var orderWorktreesByMRU = WorktreeListPreferences.defaultOrderByMRU
     @AppStorage(WorktreeListPreferences.groupWorktreesKey)
     private var groupWorktrees = WorktreeListPreferences.defaultGroupWorktrees
+    @AppStorage(ExtensionHomePreference.storageKey) private var launchHomeView = ""
     @AppStorage(ProjectSearchPreferences.visibleKey)
     private var showProjectSearch = ProjectSearchPreferences.defaultVisible
 
@@ -58,6 +59,20 @@ struct InterfaceSettingsView: View {
 
     private var localizationProviders: [ExtensionStore.LocalizationBinding] {
         LocalizationSelection.availableProviders(store: extensionStore)
+    }
+
+    private var homeViews: [ExtensionStore.HomeViewBinding] {
+        extensionStore.homeViews()
+    }
+
+    private func launchHomeViewLabel(_ binding: ExtensionStore.HomeViewBinding) -> String {
+        let base = "\(binding.muxyExtension.displayName) - \(binding.homeView.title)"
+        let duplicateCount = homeViews.count {
+            $0.muxyExtension.displayName == binding.muxyExtension.displayName
+                && $0.homeView.title == binding.homeView.title
+        }
+        guard duplicateCount > 1 else { return base }
+        return "\(base) (\(binding.homeView.id))"
     }
 
     private var localizationOptions: [LocalizationSelection.Option] {
@@ -117,6 +132,21 @@ struct InterfaceSettingsView: View {
             SettingsSection("Layout") {
                 SettingsRow("App Layout") {
                     AppLayoutPicker(selection: layoutSelection)
+                }
+            }
+
+            if !homeViews.isEmpty {
+                SettingsSection("Launch") {
+                    SettingsRow("Launch Screen") {
+                        Picker("", selection: $launchHomeView) {
+                            Text(L10n.resource("Workspace")).tag("")
+                            ForEach(homeViews) { binding in
+                                Text(verbatim: launchHomeViewLabel(binding)).tag(binding.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .settingsControl()
+                    }
                 }
             }
 
